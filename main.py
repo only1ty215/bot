@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from flask import Flask, request, render_template_string
 import telebot
 
-TOKEN = '9092673646:AAFowoc5GcZZVuJqVJjXEm746jh7QTi1WsQ'
+TOKEN = '9092673646:AAFyrSSdYznnUAOlC1jR_rZT2-3hsbYkvNI'
 ADMIN_ID = 8172701890
 
 bot = telebot.TeleBot(TOKEN)
